@@ -1,0 +1,12 @@
+   fastapi==0.103.2
+   uvicorn==0.23.2
+   asyncpg==0.28.0
+   redis==5.0.1
+   boto3==1.28.57
+   minio==7.1.16
+   python-jose[cryptography]==3.3.0
+   passlib[bcrypt]==1.7.4
+   python-multipart==0.0.6
+   aiohttp==3.8.5
+   python-dotenv==1.0.0
+   schedule==1.2.0
