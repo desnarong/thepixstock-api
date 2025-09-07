@@ -1,0 +1,750 @@
+# Event Photo Sales - Next Steps Implementation
+
+## 🚀 **Step 1: Create and Run Migrations**
+
+### **Create Migration**
+```bash
+# Navigate to project directory
+cd thepixstock
+
+# Create migration for Phase 1 models
+alembic revision --autogenerate -m "Phase 1: Photos, Orders, Payments, Downloads"
+
+# This will create a new file in alembic/versions/
+```
+
+### **Update alembic/env.py to import all models**
+```python
+# alembic/env.py - Add all model imports
+from app.models.user import User, UserSession
+from app.models.event import Event, EventSetting
+from app.models.photographer import Photographer, EventPhotographer
+from app.models.customer import Customer
+from app.models.photo import Photo, PhotoVersion, PhotoProcessingJob
+from app.models.pricing import PricingTemplate, PricingTemplateItem, EventPricing, DiscountCode
+from app.models.order import ShoppingCart, CartItem, Order, OrderItem
+from app.models.payment import Payment, PaymentWebhook, PaymentAttempt
+from app.models.download import DownloadLink, DownloadLog, DownloadPackage, DownloadSetting
+```
+
+### **Run Migration**
+```bash
+# Run the migration
+alembic upgrade head
+
+# Check database tables
+psql -h localhost -U admin -d image_db -c "\dt"
+```
+
+---
+
+## 🌱 **Step 2: Create Seed Data**
+
+### **scripts/seed_data.py**
+```python
+#!/usr/bin/env python3
+"""
+Seed initial data for ThePixStock
+"""
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+
+from app.database import SessionLocal
+from app.models.user import User, UserRole
+from app.models.photographer import Photographer
+from app.models.customer import Customer
+from app.models.event import Event, EventStatus
+from app.models.pricing import PricingTemplate, PricingTemplateItem, EventPricing, PackageType
+from app.utils.security import get_password_hash
+from datetime import datetime, timedelta
+from decimal import Decimal
+
+def create_admin_user(db):
+    """Create initial admin user"""
+    admin = db.query(User).filter(User.email == "admin@thepixstock.com").first()
+    if not admin:
+        admin = User(
+            email="admin@thepixstock.com",
+            password_hash=get_password_hash("admin123"),
+            role=UserRole.ADMIN,
+            first_name="Admin",
+            last_name="ThePixStock",
+            is_active=True,
+            email_verified=True
+        )
+        db.add(admin)
+        db.flush()
+        print(f"✅ Created admin user: {admin.email}")
+    return admin
+
+def create_test_photographer(db):
+    """Create test photographer"""
+    # User account
+    photo_user = db.query(User).filter(User.email == "photographer@test.com").first()
+    if not photo_user:
+        photo_user = User(
+            email="photographer@test.com",
+            password_hash=get_password_hash("photo123"),
+            role=UserRole.PHOTOGRAPHER,
+            first_name="John",
+            last_name="Camera",
+            phone="081-234-5678",
+            is_active=True,
+            email_verified=True
+        )
+        db.add(photo_user)
+        db.flush()
+        
+        # Photographer profile
+        photographer = Photographer(
+            user_id=photo_user.id,
+            bio="Professional event photographer with 5+ years experience",
+            commission_rate=Decimal("15.00"),
+            bank_account_name="John Camera",
+            bank_account_number="123-456-7890",
+            bank_name="Bangkok Bank"
+        )
+        db.add(photographer)
+        print(f"✅ Created photographer: {photo_user.email}")
+    
+    return photo_user
+
+def create_test_customer(db):
+    """Create test customer"""
+    customer_user = db.query(User).filter(User.email == "customer@test.com").first()
+    if not customer_user:
+        customer_user = User(
+            email="customer@test.com",
+            password_hash=get_password_hash("customer123"),
+            role=UserRole.CUSTOMER,
+            first_name="Jane",
+            last_name="Buyer",
+            phone="082-345-6789",
+            is_active=True,
+            email_verified=True
+        )
+        db.add(customer_user)
+        db.flush()
+        
+        # Customer profile
+        customer = Customer(
+            user_id=customer_user.id,
+            city="Bangkok",
+            country="Thailand",
+            marketing_consent=True
+        )
+        db.add(customer)
+        print(f"✅ Created customer: {customer_user.email}")
+    
+    return customer_user
+
+def create_pricing_template(db, admin):
+    """Create default pricing template"""
+    template = db.query(PricingTemplate).filter(PricingTemplate.name == "Standard Pricing").first()
+    if not template:
+        template = PricingTemplate(
+            name="Standard Pricing",
+            description="Default pricing for all events",
+            is_default=True,
+            created_by=admin.id
+        )
+        db.add(template)
+        db.flush()
+        
+        # Add pricing items
+        items = [
+            {
+                "package_type": PackageType.SINGLE_PHOTO,
+                "quantity": 1,
+                "price": Decimal("60.00")
+            },
+            {
+                "package_type": PackageType.PHOTO_BUNDLE,
+                "quantity": 4,
+                "price": Decimal("200.00")
+            },
+            {
+                "package_type": PackageType.UNLIMITED,
+                "quantity": None,
+                "price": Decimal("500.00")
+            }
+        ]
+        
+        for i, item_data in enumerate(items):
+            item = PricingTemplateItem(
+                template_id=template.id,
+                package_type=item_data["package_type"],
+                quantity=item_data["quantity"],
+                price=item_data["price"],
+                sort_order=i
+            )
+            db.add(item)
+        
+        print(f"✅ Created pricing template: {template.name}")
+    
+    return template
+
+def create_test_event(db, admin, photographer):
+    """Create test event"""
+    event = db.query(Event).filter(Event.name == "Test Wedding").first()
+    if not event:
+        event = Event(
+            name="Test Wedding",
+            description="Beautiful wedding ceremony at Grand Hyatt",
+            event_date=datetime.now() + timedelta(days=30),
+            location="Grand Hyatt Bangkok",
+            venue="Grand Ballroom",
+            status=EventStatus.PLANNING,
+            sales_enabled=False,
+            created_by=admin.id
+        )
+        db.add(event)
+        db.flush()
+        
+        # Add event pricing
+        pricing_items = [
+            (PackageType.SINGLE_PHOTO, 1, Decimal("60.00")),
+            (PackageType.PHOTO_BUNDLE, 4, Decimal("200.00")),
+            (PackageType.UNLIMITED, None, Decimal("500.00"))
+        ]
+        
+        for package_type, quantity, price in pricing_items:
+            event_pricing = EventPricing(
+                event_id=event.id,
+                package_type=package_type,
+                quantity=quantity,
+                price=price
+            )
+            db.add(event_pricing)
+        
+        print(f"✅ Created test event: {event.name}")
+    
+    return event
+
+def create_system_settings(db):
+    """Create system settings"""
+    from app.models.download import DownloadSetting
+    
+    # Global download settings
+    settings = db.query(DownloadSetting).filter(DownloadSetting.event_id.is_(None)).first()
+    if not settings:
+        settings = DownloadSetting(
+            event_id=None,  # Global settings
+            max_downloads_per_order=3,
+            download_expiry_hours=72,
+            max_concurrent_downloads=2,
+            max_file_size_mb=100,
+            max_package_size_mb=1000,
+            watermark_preview=True,
+            require_authentication=True,
+            jpeg_quality=95
+        )
+        db.add(settings)
+        print("✅ Created global download settings")
+
+def main():
+    print("🌱 Seeding ThePixStock Database...")
+    
+    db = SessionLocal()
+    try:
+        # Create users
+        admin = create_admin_user(db)
+        photographer = create_test_photographer(db)
+        customer = create_test_customer(db)
+        
+        # Create pricing template
+        pricing_template = create_pricing_template(db, admin)
+        
+        # Create test event
+        test_event = create_test_event(db, admin, photographer)
+        
+        # Create system settings
+        create_system_settings(db)
+        
+        # Commit all changes
+        db.commit()
+        
+        print("\n🎉 Database seeding completed!")
+        print("\n📋 Test Accounts Created:")
+        print(f"   🔑 Admin: admin@thepixstock.com / admin123")
+        print(f"   📸 Photographer: photographer@test.com / photo123")
+        print(f"   🛒 Customer: customer@test.com / customer123")
+        print(f"\n📊 Sample Data:")
+        print(f"   • 1 Event: {test_event.name}")
+        print(f"   • 1 Pricing Template: Standard (60฿/200฿/500฿)")
+        print(f"   • Download Settings: 3 downloads, 72h expiry")
+        
+    except Exception as e:
+        print(f"❌ Error seeding database: {e}")
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+if __name__ == "__main__":
+    main()
+```
+
+---
+
+## 🔐 **Step 3: Implement Authentication Service**
+
+### **app/utils/security.py**
+```python
+from passlib.context import CryptContext
+from jose import JWTError, jwt
+from datetime import datetime, timedelta
+from typing import Optional
+from app.config import settings
+
+# Password hashing
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Verify a password against its hash"""
+    return pwd_context.verify(plain_password, hashed_password)
+
+def get_password_hash(password: str) -> str:
+    """Generate password hash"""
+    return pwd_context.hash(password)
+
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    """Create JWT access token"""
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=settings.JWT_EXPIRE_MINUTES)
+    
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+    return encoded_jwt
+
+def verify_token(token: str) -> Optional[dict]:
+    """Verify JWT token and return payload"""
+    try:
+        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+        return payload
+    except JWTError:
+        return None
+```
+
+### **app/services/auth_service.py**
+```python
+from sqlalchemy.orm import Session
+from app.models.user import User
+from app.utils.security import verify_password, create_access_token
+from datetime import timedelta
+from typing import Optional
+
+class AuthService:
+    def __init__(self, db: Session):
+        self.db = db
+    
+    def authenticate_user(self, email: str, password: str) -> Optional[User]:
+        """Authenticate user with email and password"""
+        user = self.db.query(User).filter(
+            User.email == email,
+            User.is_active == True
+        ).first()
+        
+        if not user or not verify_password(password, user.password_hash):
+            return None
+        
+        # Update last login
+        user.last_login = datetime.utcnow()
+        self.db.commit()
+        
+        return user
+    
+    def create_access_token_for_user(self, user: User) -> str:
+        """Create access token for user"""
+        token_data = {
+            "sub": str(user.id),
+            "email": user.email,
+            "role": user.role.value
+        }
+        
+        access_token_expires = timedelta(minutes=settings.JWT_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            data=token_data, 
+            expires_delta=access_token_expires
+        )
+        
+        return access_token
+    
+    def get_current_user(self, token: str) -> Optional[User]:
+        """Get current user from token"""
+        payload = verify_token(token)
+        if not payload:
+            return None
+        
+        user_id = payload.get("sub")
+        if not user_id:
+            return None
+        
+        user = self.db.query(User).filter(User.id == int(user_id)).first()
+        return user
+```
+
+---
+
+## 🔧 **Step 4: Update FastAPI Main Application**
+
+### **app/main.py**
+```python
+from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi.security import HTTPBearer
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
+from app.database import get_db
+from app.services.auth_service import AuthService
+from app.config import settings
+
+# Create FastAPI app
+app = FastAPI(
+    title="ThePixStock API",
+    description="Event Photo Sales Platform",
+    version="1.0.0"
+)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Configure for production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Security
+security = HTTPBearer()
+
+# Dependency to get current user
+def get_current_user(
+    token: str = Depends(security),
+    db: Session = Depends(get_db)
+):
+    auth_service = AuthService(db)
+    user = auth_service.get_current_user(token.credentials)
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    return user
+
+# Health check
+@app.get("/health")
+def health_check():
+    return {
+        "status": "healthy",
+        "version": "1.0.0",
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+# Basic endpoints
+@app.get("/")
+def root():
+    return {
+        "message": "ThePixStock API",
+        "version": "1.0.0",
+        "docs": "/docs"
+    }
+
+# Include API routers (we'll create these next)
+# from app.api import auth, events, photos, orders
+# app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
+# app.include_router(events.router, prefix="/api/events", tags=["Events"])
+# app.include_router(photos.router, prefix="/api/photos", tags=["Photos"])
+# app.include_router(orders.router, prefix="/api/orders", tags=["Orders"])
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
+```
+
+---
+
+## 📝 **Step 5: Create Pydantic Schemas**
+
+### **app/schemas/user.py**
+```python
+from pydantic import BaseModel, EmailStr
+from typing import Optional
+from datetime import datetime
+from app.models.user import UserRole
+
+class UserBase(BaseModel):
+    email: EmailStr
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    phone: Optional[str] = None
+
+class UserCreate(UserBase):
+    password: str
+    role: UserRole
+
+class UserUpdate(BaseModel):
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    phone: Optional[str] = None
+    is_active: Optional[bool] = None
+
+class UserResponse(UserBase):
+    id: int
+    role: UserRole
+    is_active: bool
+    email_verified: bool
+    created_at: datetime
+    last_login: Optional[datetime] = None
+    
+    class Config:
+        from_attributes = True
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+class TokenData(BaseModel):
+    email: Optional[str] = None
+```
+
+### **app/schemas/event.py**
+```python
+from pydantic import BaseModel
+from typing import Optional, List
+from datetime import datetime
+from app.models.event import EventStatus
+
+class EventBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+    event_date: Optional[datetime] = None
+    location: Optional[str] = None
+    venue: Optional[str] = None
+
+class EventCreate(EventBase):
+    pass
+
+class EventUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    event_date: Optional[datetime] = None
+    location: Optional[str] = None
+    venue: Optional[str] = None
+    status: Optional[EventStatus] = None
+    sales_enabled: Optional[bool] = None
+    sales_start_date: Optional[datetime] = None
+    sales_end_date: Optional[datetime] = None
+
+class EventResponse(EventBase):
+    id: int
+    status: EventStatus
+    sales_enabled: bool
+    sales_start_date: Optional[datetime] = None
+    sales_end_date: Optional[datetime] = None
+    total_photos: int
+    approved_photos: int
+    pending_photos: int
+    rejected_photos: int
+    face_detection_completed: bool
+    created_at: datetime
+    updated_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+class EventStats(BaseModel):
+    total_views: int
+    total_sales: int
+    revenue: float
+    popular_photos: List[int]
+```
+
+---
+
+## 🧪 **Step 6: Test Setup**
+
+### **scripts/test_setup.py**
+```python
+#!/usr/bin/env python3
+"""
+Test the complete setup
+"""
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+
+import requests
+import json
+from app.database import SessionLocal
+from app.models.user import User
+from app.services.auth_service import AuthService
+
+def test_database():
+    """Test database connection and models"""
+    print("🗄️  Testing database connection...")
+    
+    try:
+        db = SessionLocal()
+        
+        # Test basic query
+        user_count = db.query(User).count()
+        print(f"   ✅ Users in database: {user_count}")
+        
+        # Test auth service
+        auth_service = AuthService(db)
+        user = auth_service.authenticate_user("admin@thepixstock.com", "admin123")
+        
+        if user:
+            print(f"   ✅ Admin authentication successful: {user.email}")
+            
+            # Test token creation
+            token = auth_service.create_access_token_for_user(user)
+            print(f"   ✅ JWT token created: {token[:20]}...")
+            
+            # Test token verification
+            verified_user = auth_service.get_current_user(token)
+            if verified_user and verified_user.id == user.id:
+                print("   ✅ Token verification successful")
+            else:
+                print("   ❌ Token verification failed")
+        else:
+            print("   ❌ Admin authentication failed")
+        
+        db.close()
+        return True
+        
+    except Exception as e:
+        print(f"   ❌ Database test failed: {e}")
+        return False
+
+def test_api():
+    """Test API endpoints"""
+    print("\n🌐 Testing API endpoints...")
+    
+    try:
+        # Test health endpoint
+        response = requests.get("http://localhost:8000/health")
+        if response.status_code == 200:
+            print("   ✅ Health check successful")
+        else:
+            print("   ❌ Health check failed")
+            return False
+        
+        # Test root endpoint
+        response = requests.get("http://localhost:8000/")
+        if response.status_code == 200:
+            data = response.json()
+            print(f"   ✅ Root endpoint: {data['message']}")
+        else:
+            print("   ❌ Root endpoint failed")
+            return False
+        
+        return True
+        
+    except requests.exceptions.ConnectionError:
+        print("   ⚠️  API server not running (start with: uvicorn app.main:app --reload)")
+        return False
+    except Exception as e:
+        print(f"   ❌ API test failed: {e}")
+        return False
+
+def main():
+    print("🧪 Testing ThePixStock Setup...")
+    
+    db_ok = test_database()
+    api_ok = test_api()
+    
+    if db_ok and api_ok:
+        print("\n🎉 All tests passed!")
+        print("\n📋 Next Steps:")
+        print("   1. Start API server: uvicorn app.main:app --reload")
+        print("   2. Open docs: http://localhost:8000/docs")
+        print("   3. Test authentication with admin@thepixstock.com / admin123")
+    else:
+        print("\n❌ Some tests failed. Check the errors above.")
+
+if __name__ == "__main__":
+    main()
+```
+
+---
+
+## 🚀 **Step 7: Run Complete Setup**
+
+### **Execute All Steps**
+```bash
+# 1. Create and run migration
+alembic revision --autogenerate -m "Phase 1: Complete models"
+alembic upgrade head
+
+# 2. Seed initial data
+python scripts/seed_data.py
+
+# 3. Test setup
+python scripts/test_setup.py
+
+# 4. Start API server
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+### **Verify Installation**
+```bash
+# Check database tables
+psql -h localhost -U admin -d image_db -c "
+SELECT 
+    schemaname,
+    tablename,
+    tableowner
+FROM pg_tables 
+WHERE schemaname = 'public'
+ORDER BY tablename;
+"
+
+# Check API health
+curl http://localhost:8000/health
+
+# Open API documentation
+open http://localhost:8000/docs
+```
+
+---
+
+## ✅ **Success Checklist**
+
+### **Database Setup ✅**
+- [ ] PostgreSQL connection working
+- [ ] All 25+ tables created
+- [ ] Sample data seeded
+- [ ] Admin user created
+
+### **API Foundation ✅**
+- [ ] FastAPI app running
+- [ ] Authentication working
+- [ ] JWT tokens generated
+- [ ] Health check responds
+
+### **Models & Schemas ✅**
+- [ ] User models working
+- [ ] Event models created
+- [ ] Photo models ready
+- [ ] Order/Payment models ready
+
+### **Ready for Development ✅**
+- [ ] Project structure complete
+- [ ] Environment configured
+- [ ] Test accounts available
+- [ ] API docs accessible
+
+---
+
+**สถานะ:** Foundation Complete ✅  
+**ขั้นตอนต่อไป:** API Endpoints Implementation  
+**Test Accounts:** admin@thepixstock.com / admin123  
+**API Docs:** http://localhost:8000/docs
