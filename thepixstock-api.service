@@ -1,0 +1,15 @@
+[Unit]
+Description=ThePixStock API
+After=network.target
+
+[Service]
+Type=notify
+User=thepixstock
+Group=thepixstock
+Restart=always
+RestartSec=1
+WorkingDirectory=/home/backend/thepixstock-api/publish
+ExecStart=/home/backend/thepixstock-api/publish/ThePixStock.API
+
+[Install]
+WantedBy=multi-user.target
